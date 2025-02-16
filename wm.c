@@ -31,6 +31,7 @@ static xcb_connection_t* conn;
 static xcb_screen_t* screen;
 static struct Window* windows = NULL;
 static int window_count = 0;
+static struct Window* focused_window = NULL;
 
 static int debug_enabled = 1;
 
@@ -109,6 +110,41 @@ window_delete(xcb_window_t id)
 }
 
 void
+focus_window(struct Window* win)
+{
+  if (win == focused_window)
+    return;
+
+  // Update header and border colors for focused/unfocused windows
+  for (int i = 0; i < window_count; i++) {
+    uint32_t header_color =
+      (win == &windows[i]) ? FOCUSED_HEADER_COLOR : UNFOCUSED_HEADER_COLOR;
+    uint32_t border_color =
+      (win == &windows[i]) ? FOCUSED_BORDER_COLOR : UNFOCUSED_BORDER_COLOR;
+
+    uint32_t values[] = { header_color };
+    xcb_change_window_attributes(
+      conn, windows[i].header, XCB_CW_BACK_PIXEL, values);
+
+    values[0] = border_color;
+    xcb_change_window_attributes(
+      conn, windows[i].frame, XCB_CW_BORDER_PIXEL, values);
+
+    xcb_clear_area(conn, 0, windows[i].header, 0, 0, 0, 0);
+  }
+
+  // Raise focused window to top
+  if (win) {
+    uint32_t values_stack[] = { XCB_STACK_MODE_ABOVE };
+    xcb_configure_window(
+      conn, win->frame, XCB_CONFIG_WINDOW_STACK_MODE, values_stack);
+  }
+
+  focused_window = win;
+  xcb_flush(conn);
+}
+
+void
 handle_map_request(xcb_map_request_event_t* ev)
 {
   debug("Received map request for window: %d", ev->window);
@@ -127,12 +163,12 @@ handle_map_request(xcb_map_request_event_t* ev)
 
   // Create frame window
   xcb_window_t frame = xcb_generate_id(conn);
-  uint32_t frame_vals[] = { BORDER_COLOR,
+  uint32_t frame_vals[] = { UNFOCUSED_BORDER_COLOR,
                             XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY |
                               XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT };
 
   int16_t frame_x = geom->x;
-  int16_t frame_y = (geom->y < HEADER_HEIGHT) ? 0 : geom->y - HEADER_HEIGHT;
+  int16_t frame_y = (geom->y < HEADER_SIZE) ? 0 : geom->y - HEADER_SIZE;
 
   xcb_create_window(conn,
                     screen->root_depth,
@@ -141,8 +177,8 @@ handle_map_request(xcb_map_request_event_t* ev)
                     frame_x,
                     frame_y,
                     geom->width,
-                    geom->height + HEADER_HEIGHT,
-                    1,
+                    geom->height + HEADER_SIZE,
+                    BORDER_SIZE,
                     XCB_WINDOW_CLASS_INPUT_OUTPUT,
                     screen->root_visual,
                     XCB_CW_BORDER_PIXEL | XCB_CW_EVENT_MASK,
@@ -150,7 +186,7 @@ handle_map_request(xcb_map_request_event_t* ev)
 
   // Create header window
   xcb_window_t header = xcb_generate_id(conn);
-  uint32_t header_vals[] = { HEADER_COLOR,
+  uint32_t header_vals[] = { UNFOCUSED_HEADER_COLOR,
                              XCB_EVENT_MASK_BUTTON_PRESS |
                                XCB_EVENT_MASK_BUTTON_RELEASE |
                                XCB_EVENT_MASK_BUTTON_MOTION };
@@ -158,26 +194,25 @@ handle_map_request(xcb_map_request_event_t* ev)
   xcb_create_window(conn,
                     screen->root_depth,
                     header,
-                    frame, // parent is frame
-                    0,     // x position relative to frame
-                    0,     // y position relative to frame
+                    frame,
+                    0,
+                    0,
                     geom->width,
-                    HEADER_HEIGHT,
+                    HEADER_SIZE,
                     0,
                     XCB_WINDOW_CLASS_INPUT_OUTPUT,
                     screen->root_visual,
                     XCB_CW_BACK_PIXEL | XCB_CW_EVENT_MASK,
                     header_vals);
 
-  window_create(
+  struct Window* win = window_create(
     ev->window, frame, header, geom->x, geom->y, geom->width, geom->height);
 
-  // Reparent client window into frame
-  xcb_reparent_window(conn,
-                      ev->window,
-                      frame,
-                      0,              // x position relative to frame
-                      HEADER_HEIGHT); // y position relative to frame
+  // Reparent client window
+  xcb_reparent_window(conn, ev->window, frame, 0, HEADER_SIZE);
+
+  // Focus frame window
+  focus_window(win);
 
   xcb_map_window(conn, frame);
   xcb_map_window(conn, header);
@@ -242,14 +277,32 @@ void
 handle_button_press(xcb_button_press_event_t* ev)
 {
   struct Window* win = window_find(ev->event);
-  if (!win || ev->event != win->header)
-    return;
+  if (!win && ev->child != XCB_NONE) {
+    win = window_find(ev->child);
+  }
 
-  drag_state.window = win;
-  drag_state.orig_x = win->x;
-  drag_state.orig_y = win->y;
-  drag_state.press_x = ev->root_x;
-  drag_state.press_y = ev->root_y;
+  if (!win) {
+    debug(
+      "No window found for event window %d or child %d", ev->event, ev->child);
+    xcb_allow_events(conn, XCB_ALLOW_REPLAY_POINTER, ev->time);
+    xcb_flush(conn);
+    return;
+  }
+
+  // Focus clicked window
+  focus_window(win);
+
+  // If header is clicked, start drag
+  if (ev->event == win->header) {
+    drag_state.window = win;
+    drag_state.orig_x = win->x;
+    drag_state.orig_y = win->y;
+    drag_state.press_x = ev->root_x;
+    drag_state.press_y = ev->root_y;
+  }
+
+  xcb_allow_events(conn, XCB_ALLOW_REPLAY_POINTER, ev->time);
+  xcb_flush(conn);
 }
 
 void
@@ -274,8 +327,9 @@ handle_motion_notify(xcb_motion_notify_event_t* ev)
   int16_t delta_y = ev->root_y - drag_state.press_y;
 
   // Update position of the frame window
-  uint32_t values[2] = { drag_state.orig_x + delta_x,
-                         drag_state.orig_y + delta_y };
+  drag_state.window->x = drag_state.orig_x + delta_x;
+  drag_state.window->y = drag_state.orig_y + delta_y;
+  uint32_t values[2] = { drag_state.window->x, drag_state.window->y };
 
   xcb_configure_window(conn,
                        drag_state.window->frame,
@@ -331,15 +385,25 @@ setup(void)
   if (!screen)
     die("Failed to get screen");
 
-  uint32_t values[] = {
-    XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT | XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY |
-    XCB_EVENT_MASK_ENTER_WINDOW | XCB_EVENT_MASK_LEAVE_WINDOW |
-    XCB_EVENT_MASK_STRUCTURE_NOTIFY | XCB_EVENT_MASK_PROPERTY_CHANGE |
-    XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE |
-    XCB_EVENT_MASK_KEY_PRESS | XCB_EVENT_MASK_KEY_RELEASE
-  };
+  uint32_t values[] = { XCB_EVENT_MASK_SUBSTRUCTURE_REDIRECT |
+                        XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY |
+                        XCB_EVENT_MASK_BUTTON_PRESS |
+                        XCB_EVENT_MASK_BUTTON_RELEASE };
 
   xcb_change_window_attributes(conn, screen->root, XCB_CW_EVENT_MASK, values);
+
+  // Grab all button presses on root window
+  xcb_grab_button(conn,
+                  0,
+                  screen->root,
+                  XCB_EVENT_MASK_BUTTON_PRESS,
+                  XCB_GRAB_MODE_SYNC,
+                  XCB_GRAB_MODE_ASYNC,
+                  XCB_NONE,
+                  XCB_NONE,
+                  XCB_BUTTON_INDEX_ANY,
+                  XCB_MOD_MASK_ANY);
+
   xcb_flush(conn);
 }
 
