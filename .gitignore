@@ -1,0 +1,6 @@
+# Build files
+wm
+*.o
+
+# Editor files
+.vscode/
