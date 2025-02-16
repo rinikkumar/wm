@@ -189,7 +189,7 @@ handle_map_request(xcb_map_request_event_t* ev)
   uint32_t header_vals[] = { UNFOCUSED_HEADER_COLOR,
                              XCB_EVENT_MASK_BUTTON_PRESS |
                                XCB_EVENT_MASK_BUTTON_RELEASE |
-                               XCB_EVENT_MASK_BUTTON_MOTION };
+                               XCB_EVENT_MASK_BUTTON_1_MOTION };
 
   xcb_create_window(conn,
                     screen->root_depth,
@@ -292,8 +292,8 @@ handle_button_press(xcb_button_press_event_t* ev)
   // Focus clicked window
   focus_window(win);
 
-  // If header is clicked, start drag
-  if (ev->event == win->header) {
+  // If header is clicked with button 1, start drag
+  if (ev->event == win->header && ev->detail == XCB_BUTTON_INDEX_1) {
     drag_state.window = win;
     drag_state.orig_x = win->x;
     drag_state.orig_y = win->y;
@@ -365,6 +365,9 @@ run(void)
         break;
       case XCB_MOTION_NOTIFY:
         handle_motion_notify((xcb_motion_notify_event_t*)ev);
+        break;
+      case XCB_ENTER_NOTIFY: // Ignore enter events
+      case XCB_LEAVE_NOTIFY: // Ignore leave events
         break;
       default:
         debug("Unhandled event: %d", ev->response_type & ~0x80);
