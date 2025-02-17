@@ -7,6 +7,8 @@
 #include <xcb/xcb.h>
 
 #include "config.h"
+#include "ipc.h"
+#include "utils.h"
 
 struct Window
 {
@@ -29,36 +31,10 @@ struct
 
 static xcb_connection_t* conn;
 static xcb_screen_t* screen;
+static xcb_atom_t wm_command_atom;
 static struct Window* windows = NULL;
 static int window_count = 0;
 static struct Window* focused_window = NULL;
-
-static int debug_enabled = 1;
-
-void
-debug(const char* fmt, ...)
-{
-  if (!debug_enabled)
-    return;
-
-  time_t now = time(NULL);
-  char timestamp[64];
-  strftime(timestamp, sizeof(timestamp), "%H:%M:%S", localtime(&now));
-
-  va_list ap;
-  va_start(ap, fmt);
-  fprintf(stderr, "[%s] ", timestamp);
-  vfprintf(stderr, fmt, ap);
-  fprintf(stderr, "\n");
-  va_end(ap);
-}
-
-void
-die(const char* msg)
-{
-  fprintf(stderr, "Error: %s\n", msg);
-  exit(1);
-}
 
 struct Window*
 window_create(xcb_window_t id,
@@ -271,6 +247,21 @@ void
 handle_destroy_notify(xcb_destroy_notify_event_t* ev)
 {
   debug("Window %d destroyed", ev->window);
+
+  struct Window* win = window_find(ev->window);
+  if (win) {
+    // Clean up frame and header
+    xcb_destroy_window(conn, win->frame);
+    xcb_destroy_window(conn, win->header);
+
+    if (win == focused_window) {
+      focused_window = NULL;
+    }
+
+    window_delete(win->id);
+
+    xcb_flush(conn);
+  }
 }
 
 void
@@ -339,6 +330,29 @@ handle_motion_notify(xcb_motion_notify_event_t* ev)
 }
 
 void
+handle_command(const char* cmd)
+{
+  if (strcmp(cmd, "kill-window") == 0) {
+    if (focused_window) {
+      xcb_kill_client(conn, focused_window->id);
+      xcb_flush(conn);
+    }
+  }
+}
+
+void
+handle_client_message(xcb_client_message_event_t* ev)
+{
+  if (ev->type == wm_command_atom) {
+    // Extract command from event data
+    char cmd[21] = { 0 }; // 20 chars + null terminator
+    memcpy(cmd, ev->data.data8, 20);
+    debug("Received client message: %s", cmd);
+    handle_command(cmd);
+  }
+}
+
+void
 run(void)
 {
   xcb_generic_event_t* ev;
@@ -368,6 +382,9 @@ run(void)
         break;
       case XCB_ENTER_NOTIFY: // Ignore enter events
       case XCB_LEAVE_NOTIFY: // Ignore leave events
+        break;
+      case XCB_CLIENT_MESSAGE:
+        handle_client_message((xcb_client_message_event_t*)ev);
         break;
       default:
         debug("Unhandled event: %d", ev->response_type & ~0x80);
@@ -406,6 +423,9 @@ setup(void)
                   XCB_NONE,
                   XCB_BUTTON_INDEX_ANY,
                   XCB_MOD_MASK_ANY);
+
+  // Create command atom for IPC
+  wm_command_atom = init_wm_command_atom(conn);
 
   xcb_flush(conn);
 }

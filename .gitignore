@@ -1,5 +1,6 @@
 # Build files
 wm
+wmc
 *.o
 
 # Editor files

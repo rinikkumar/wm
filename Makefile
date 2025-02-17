@@ -2,23 +2,24 @@ CC = clang
 CFLAGS = -Wall -Wextra -O2
 LDFLAGS = -lxcb
 
-TARGET = wm
-SRC = wm.c
-OBJ = $(SRC:.c=.o)
-HEADERS = config.h
+TARGETS = wm wmc
+OBJS = wm.o wmc.o utils.o ipc.o
 
 .PHONY: all clean format
 
-all: $(TARGET)
+all: $(TARGETS)
 
-$(TARGET): $(OBJ)
-	$(CC) $(OBJ) -o $(TARGET) $(LDFLAGS)
+wm: wm.o utils.o ipc.o
+	$(CC) -o $@ $^ $(LDFLAGS)
+
+wmc: wmc.o utils.o ipc.o
+	$(CC) -o $@ $^ $(LDFLAGS)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -f $(TARGET) $(OBJ)
+	rm -f $(TARGETS) $(OBJS)
 
 format:
-	clang-format -style=Mozilla -i $(SRC) $(HEADERS)
+	clang-format -style=Mozilla -i *.c *.h
