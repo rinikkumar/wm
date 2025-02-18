@@ -38,3 +38,15 @@ init_resize_command_atom(xcb_connection_t* conn)
 {
   return init_atom(conn, WM_COMMAND_RESIZE);
 }
+
+xcb_atom_t
+init_focus_next_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_FOCUS_NEXT);
+}
+
+xcb_atom_t
+init_focus_prev_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_FOCUS_PREV);
+}
