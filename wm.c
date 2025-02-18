@@ -34,6 +34,8 @@ static xcb_screen_t* screen;
 static xcb_atom_t kill_command_atom;
 static xcb_atom_t move_command_atom;
 static xcb_atom_t resize_command_atom;
+static xcb_atom_t focus_next_command_atom;
+static xcb_atom_t focus_prev_command_atom;
 static struct Window* windows = NULL;
 static int window_count = 0;
 static struct Window* focused_window = NULL;
@@ -184,6 +186,31 @@ resize_window(xcb_client_message_event_t* ev)
                          values);
     xcb_flush(conn);
   }
+}
+
+void
+focus_window_relative(int direction)
+{
+  if (!window_count)
+    return;
+
+  if (!focused_window) {
+    focus_window(&windows[0]);
+    return;
+  }
+
+  // Find current window index
+  int current = 0;
+  for (int i = 0; i < window_count; i++) {
+    if (&windows[i] == focused_window) {
+      current = i;
+      break;
+    }
+  }
+
+  // Calculate new index with wrap-around
+  int new_index = (current + direction + window_count) % window_count;
+  focus_window(&windows[new_index]);
 }
 
 void
@@ -404,6 +431,10 @@ handle_client_message(xcb_client_message_event_t* ev)
     move_window(ev);
   } else if (ev->type == resize_command_atom) {
     resize_window(ev);
+  } else if (ev->type == focus_next_command_atom) {
+    focus_window_relative(1);
+  } else if (ev->type == focus_prev_command_atom) {
+    focus_window_relative(-1);
   } else {
     debug("Unhandled client message type: %d", ev->type);
   }
@@ -484,6 +515,8 @@ setup(void)
   kill_command_atom = init_kill_command_atom(conn);
   move_command_atom = init_move_command_atom(conn);
   resize_command_atom = init_resize_command_atom(conn);
+  focus_next_command_atom = init_focus_next_command_atom(conn);
+  focus_prev_command_atom = init_focus_prev_command_atom(conn);
 
   xcb_flush(conn);
 }
