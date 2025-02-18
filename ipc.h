@@ -3,11 +3,14 @@
 
 #include <xcb/xcb.h>
 
-// Window manager command atom name
-#define WM_COMMAND_ATOM "_WM_COMMAND"
+// Command atoms
+#define WM_COMMAND_KILL "_WM_COMMAND_KILL"
+#define WM_COMMAND_MOVE "_WM_COMMAND_MOVE"
 
-// Initialize window manager command atom
+// Initialize window manager command atoms
 xcb_atom_t
-init_wm_command_atom(xcb_connection_t* conn);
+init_kill_command_atom(xcb_connection_t* conn);
+xcb_atom_t
+init_move_command_atom(xcb_connection_t* conn);
 
 #endif /* IPC_H */

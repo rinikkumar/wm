@@ -9,6 +9,6 @@ debug(const char* fmt, ...);
 
 // Print error message and exit
 void
-die(const char* msg);
+die(const char* fmt, ...);
 
 #endif /* UTILS_H */

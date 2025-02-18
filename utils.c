@@ -26,8 +26,13 @@ debug(const char* fmt, ...)
 }
 
 void
-die(const char* msg)
+die(const char* fmt, ...)
 {
-  fprintf(stderr, "Error: %s\n", msg);
+  va_list ap;
+  va_start(ap, fmt);
+  fprintf(stderr, "Error: ");
+  vfprintf(stderr, fmt, ap);
+  fprintf(stderr, "\n");
+  va_end(ap);
   exit(1);
 }

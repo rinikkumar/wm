@@ -31,7 +31,8 @@ struct
 
 static xcb_connection_t* conn;
 static xcb_screen_t* screen;
-static xcb_atom_t wm_command_atom;
+static xcb_atom_t kill_command_atom;
+static xcb_atom_t move_command_atom;
 static struct Window* windows = NULL;
 static int window_count = 0;
 static struct Window* focused_window = NULL;
@@ -118,6 +119,34 @@ focus_window(struct Window* win)
 
   focused_window = win;
   xcb_flush(conn);
+}
+
+void
+kill_window()
+{
+  if (focused_window) {
+    xcb_kill_client(conn, focused_window->id);
+    xcb_flush(conn);
+  }
+}
+
+void
+move_window(xcb_client_message_event_t* ev)
+{
+  if (focused_window) {
+    int16_t dx = ev->data.data32[0];
+    int16_t dy = ev->data.data32[1];
+
+    focused_window->x += dx;
+    focused_window->y += dy;
+
+    uint32_t values[2] = { focused_window->x, focused_window->y };
+    xcb_configure_window(conn,
+                         focused_window->frame,
+                         XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y,
+                         values);
+    xcb_flush(conn);
+  }
 }
 
 void
@@ -330,25 +359,14 @@ handle_motion_notify(xcb_motion_notify_event_t* ev)
 }
 
 void
-handle_command(const char* cmd)
-{
-  if (strcmp(cmd, "kill-window") == 0) {
-    if (focused_window) {
-      xcb_kill_client(conn, focused_window->id);
-      xcb_flush(conn);
-    }
-  }
-}
-
-void
 handle_client_message(xcb_client_message_event_t* ev)
 {
-  if (ev->type == wm_command_atom) {
-    // Extract command from event data
-    char cmd[21] = { 0 }; // 20 chars + null terminator
-    memcpy(cmd, ev->data.data8, 20);
-    debug("Received client message: %s", cmd);
-    handle_command(cmd);
+  if (ev->type == kill_command_atom) {
+    kill_window();
+  } else if (ev->type == move_command_atom) {
+    move_window(ev);
+  } else {
+    debug("Unhandled client message type: %d", ev->type);
   }
 }
 
@@ -424,8 +442,8 @@ setup(void)
                   XCB_BUTTON_INDEX_ANY,
                   XCB_MOD_MASK_ANY);
 
-  // Create command atom for IPC
-  wm_command_atom = init_wm_command_atom(conn);
+  kill_command_atom = init_kill_command_atom(conn);
+  move_command_atom = init_move_command_atom(conn);
 
   xcb_flush(conn);
 }
