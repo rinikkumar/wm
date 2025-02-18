@@ -9,6 +9,7 @@ static xcb_connection_t* conn;
 static xcb_screen_t* screen;
 static xcb_atom_t kill_command_atom;
 static xcb_atom_t move_command_atom;
+static xcb_atom_t resize_command_atom;
 
 struct Command
 {
@@ -20,6 +21,7 @@ struct Command
 static const struct Command commands[] = {
   { "kill-window", &kill_command_atom, 0 },
   { "move-window", &move_command_atom, 2 },
+  { "resize-window", &resize_command_atom, 2 },
 };
 
 static void
@@ -95,6 +97,7 @@ setup(void)
 
   kill_command_atom = init_kill_command_atom(conn);
   move_command_atom = init_move_command_atom(conn);
+  resize_command_atom = init_resize_command_atom(conn);
 
   xcb_flush(conn);
 }

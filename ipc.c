@@ -32,3 +32,9 @@ init_move_command_atom(xcb_connection_t* conn)
 {
   return init_atom(conn, WM_COMMAND_MOVE);
 }
+
+xcb_atom_t
+init_resize_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_RESIZE);
+}

@@ -33,6 +33,7 @@ static xcb_connection_t* conn;
 static xcb_screen_t* screen;
 static xcb_atom_t kill_command_atom;
 static xcb_atom_t move_command_atom;
+static xcb_atom_t resize_command_atom;
 static struct Window* windows = NULL;
 static int window_count = 0;
 static struct Window* focused_window = NULL;
@@ -144,6 +145,42 @@ move_window(xcb_client_message_event_t* ev)
     xcb_configure_window(conn,
                          focused_window->frame,
                          XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y,
+                         values);
+    xcb_flush(conn);
+  }
+}
+
+void
+resize_window(xcb_client_message_event_t* ev)
+{
+  if (focused_window) {
+    int16_t dx = ev->data.data32[0];
+    int16_t dy = ev->data.data32[1];
+
+    focused_window->width += dx;
+    focused_window->height += dy;
+
+    // Resize the frame window
+    uint32_t values[2] = { focused_window->width, focused_window->height };
+    xcb_configure_window(conn,
+                         focused_window->frame,
+                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
+                         values);
+
+    // Resize the header window
+    values[0] = focused_window->width;
+    values[1] = HEADER_SIZE;
+    xcb_configure_window(conn,
+                         focused_window->header,
+                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
+                         values);
+
+    // Resize the client window
+    values[0] = focused_window->width - 2 * BORDER_SIZE;
+    values[1] = focused_window->height - HEADER_SIZE - 2 * BORDER_SIZE;
+    xcb_configure_window(conn,
+                         focused_window->id,
+                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
                          values);
     xcb_flush(conn);
   }
@@ -365,6 +402,8 @@ handle_client_message(xcb_client_message_event_t* ev)
     kill_window();
   } else if (ev->type == move_command_atom) {
     move_window(ev);
+  } else if (ev->type == resize_command_atom) {
+    resize_window(ev);
   } else {
     debug("Unhandled client message type: %d", ev->type);
   }
@@ -444,6 +483,7 @@ setup(void)
 
   kill_command_atom = init_kill_command_atom(conn);
   move_command_atom = init_move_command_atom(conn);
+  resize_command_atom = init_resize_command_atom(conn);
 
   xcb_flush(conn);
 }
