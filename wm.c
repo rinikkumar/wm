@@ -1,4 +1,5 @@
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -10,14 +11,29 @@
 #include "ipc.h"
 #include "utils.h"
 
+enum WindowState
+{
+  STATE_NORMAL,
+  STATE_FULLSCREEN,
+  STATE_SNAPPED_LEFT,
+  STATE_SNAPPED_RIGHT,
+  STATE_MAXIMIZED
+};
+
 struct Window
 {
-  xcb_window_t id;     // Original window
-  xcb_window_t frame;  // Frame containing header + window
-  xcb_window_t header; // Header window
-  int16_t x, y;        // Position
-  uint16_t width;      // Width
-  uint16_t height;     // Height
+  xcb_window_t id;        // Original window
+  xcb_window_t frame;     // Frame containing header + window
+  xcb_window_t header;    // Header window
+  int16_t x, y;           // Position
+  uint16_t width, height; // Dimensions
+  enum WindowState state; // Window state
+  struct
+  {
+    int16_t x, y;
+    uint16_t width, height;
+  } saved;             // Saved position/dimensions
+  struct Window* next; // Next window in list
 };
 
 struct
@@ -36,6 +52,10 @@ static xcb_atom_t move_command_atom;
 static xcb_atom_t resize_command_atom;
 static xcb_atom_t focus_next_command_atom;
 static xcb_atom_t focus_prev_command_atom;
+static xcb_atom_t snap_left_command_atom;
+static xcb_atom_t snap_right_command_atom;
+static xcb_atom_t maximize_command_atom;
+static xcb_atom_t fullscreen_command_atom;
 static struct Window* windows = NULL;
 static int window_count = 0;
 static struct Window* focused_window = NULL;
@@ -90,6 +110,27 @@ window_delete(xcb_window_t id)
 }
 
 void
+save_window_state(struct Window* win)
+{
+  if (win->state == STATE_NORMAL) {
+    win->saved.x = win->x;
+    win->saved.y = win->y;
+    win->saved.width = win->width;
+    win->saved.height = win->height;
+  }
+}
+
+void
+restore_window_state(struct Window* win)
+{
+  win->state = STATE_NORMAL;
+  win->x = win->saved.x;
+  win->y = win->saved.y;
+  win->width = win->saved.width;
+  win->height = win->saved.height;
+}
+
+void
 focus_window(struct Window* win)
 {
   if (win == focused_window)
@@ -125,7 +166,60 @@ focus_window(struct Window* win)
 }
 
 void
-kill_window()
+resize_window(struct Window* win,
+              int16_t x,
+              int16_t y,
+              uint16_t width,
+              uint16_t height,
+              bool show_decorations)
+{
+  win->x = x;
+  win->y = y;
+  win->width = width;
+  win->height = height;
+
+  // Configure the frame window
+  uint32_t frame_vals[] = {
+    win->x, win->y, win->width, win->height, show_decorations ? BORDER_SIZE : 0
+  };
+  xcb_configure_window(conn,
+                       win->frame,
+                       XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT |
+                         XCB_CONFIG_WINDOW_BORDER_WIDTH,
+                       frame_vals);
+
+  // Configure the header window
+  if (show_decorations) {
+    xcb_map_window(conn, win->header);
+    uint32_t header_vals[] = { 0, 0, win->width, HEADER_SIZE };
+    xcb_configure_window(conn,
+                         win->header,
+                         XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+                           XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
+                         header_vals);
+  } else {
+    xcb_unmap_window(conn, win->header);
+  }
+
+  // Configure the client window
+  uint32_t client_vals[] = {
+    0,
+    show_decorations ? HEADER_SIZE : 0,
+    win->width - (show_decorations ? 2 * BORDER_SIZE : 0),
+    win->height - (show_decorations ? HEADER_SIZE + 2 * BORDER_SIZE : 0)
+  };
+  xcb_configure_window(conn,
+                       win->id,
+                       XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y |
+                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
+                       client_vals);
+
+  xcb_flush(conn);
+}
+
+void
+handle_kill_window()
 {
   if (focused_window) {
     xcb_kill_client(conn, focused_window->id);
@@ -134,7 +228,7 @@ kill_window()
 }
 
 void
-move_window(xcb_client_message_event_t* ev)
+handle_move_window(xcb_client_message_event_t* ev)
 {
   if (focused_window) {
     int16_t dx = ev->data.data32[0];
@@ -153,39 +247,20 @@ move_window(xcb_client_message_event_t* ev)
 }
 
 void
-resize_window(xcb_client_message_event_t* ev)
+handle_resize_window(xcb_client_message_event_t* ev)
 {
-  if (focused_window) {
-    int16_t dx = ev->data.data32[0];
-    int16_t dy = ev->data.data32[1];
+  if (!focused_window)
+    return;
 
-    focused_window->width += dx;
-    focused_window->height += dy;
+  int16_t dx = ev->data.data32[0];
+  int16_t dy = ev->data.data32[1];
 
-    // Resize the frame window
-    uint32_t values[2] = { focused_window->width, focused_window->height };
-    xcb_configure_window(conn,
-                         focused_window->frame,
-                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
-                         values);
-
-    // Resize the header window
-    values[0] = focused_window->width;
-    values[1] = HEADER_SIZE;
-    xcb_configure_window(conn,
-                         focused_window->header,
-                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
-                         values);
-
-    // Resize the client window
-    values[0] = focused_window->width - 2 * BORDER_SIZE;
-    values[1] = focused_window->height - HEADER_SIZE - 2 * BORDER_SIZE;
-    xcb_configure_window(conn,
-                         focused_window->id,
-                         XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT,
-                         values);
-    xcb_flush(conn);
-  }
+  resize_window(focused_window,
+                focused_window->x,
+                focused_window->y,
+                focused_window->width + dx,
+                focused_window->height + dy,
+                true);
 }
 
 void
@@ -211,6 +286,110 @@ focus_window_relative(int direction)
   // Calculate new index with wrap-around
   int new_index = (current + direction + window_count) % window_count;
   focus_window(&windows[new_index]);
+}
+
+void
+handle_toggle_snap_left(void)
+{
+  if (!focused_window)
+    return;
+
+  if (focused_window->state != STATE_SNAPPED_LEFT) {
+    save_window_state(focused_window);
+    focused_window->state = STATE_SNAPPED_LEFT;
+    resize_window(focused_window,
+                  0,
+                  0,
+                  screen->width_in_pixels / 2,
+                  screen->height_in_pixels,
+                  true);
+  } else {
+    restore_window_state(focused_window);
+    resize_window(focused_window,
+                  focused_window->x,
+                  focused_window->y,
+                  focused_window->width,
+                  focused_window->height,
+                  true);
+  }
+}
+
+void
+handle_toggle_snap_right(void)
+{
+  if (!focused_window)
+    return;
+
+  if (focused_window->state != STATE_SNAPPED_RIGHT) {
+    save_window_state(focused_window);
+    focused_window->state = STATE_SNAPPED_RIGHT;
+    resize_window(focused_window,
+                  screen->width_in_pixels / 2,
+                  0,
+                  screen->width_in_pixels / 2,
+                  screen->height_in_pixels,
+                  true);
+  } else {
+    restore_window_state(focused_window);
+    resize_window(focused_window,
+                  focused_window->x,
+                  focused_window->y,
+                  focused_window->width,
+                  focused_window->height,
+                  true);
+  }
+}
+
+void
+handle_toggle_maximize(void)
+{
+  if (!focused_window)
+    return;
+
+  if (focused_window->state != STATE_MAXIMIZED) {
+    save_window_state(focused_window);
+    focused_window->state = STATE_MAXIMIZED;
+    resize_window(focused_window,
+                  0,
+                  0,
+                  screen->width_in_pixels,
+                  screen->height_in_pixels,
+                  true);
+  } else {
+    restore_window_state(focused_window);
+    resize_window(focused_window,
+                  focused_window->x,
+                  focused_window->y,
+                  focused_window->width,
+                  focused_window->height,
+                  true);
+  }
+}
+
+void
+handle_toggle_fullscreen(void)
+{
+  if (!focused_window)
+    return;
+
+  if (focused_window->state != STATE_FULLSCREEN) {
+    save_window_state(focused_window);
+    focused_window->state = STATE_FULLSCREEN;
+    resize_window(focused_window,
+                  0,
+                  0,
+                  screen->width_in_pixels,
+                  screen->height_in_pixels,
+                  false);
+  } else {
+    restore_window_state(focused_window);
+    resize_window(focused_window,
+                  focused_window->x,
+                  focused_window->y,
+                  focused_window->width,
+                  focused_window->height,
+                  true);
+  }
 }
 
 void
@@ -426,15 +605,23 @@ void
 handle_client_message(xcb_client_message_event_t* ev)
 {
   if (ev->type == kill_command_atom) {
-    kill_window();
+    handle_kill_window();
   } else if (ev->type == move_command_atom) {
-    move_window(ev);
+    handle_move_window(ev);
   } else if (ev->type == resize_command_atom) {
-    resize_window(ev);
+    handle_resize_window(ev);
   } else if (ev->type == focus_next_command_atom) {
     focus_window_relative(1);
   } else if (ev->type == focus_prev_command_atom) {
     focus_window_relative(-1);
+  } else if (ev->type == maximize_command_atom) {
+    handle_toggle_maximize();
+  } else if (ev->type == fullscreen_command_atom) {
+    handle_toggle_fullscreen();
+  } else if (ev->type == snap_left_command_atom) {
+    handle_toggle_snap_left();
+  } else if (ev->type == snap_right_command_atom) {
+    handle_toggle_snap_right();
   } else {
     debug("Unhandled client message type: %d", ev->type);
   }
@@ -517,6 +704,11 @@ setup(void)
   resize_command_atom = init_resize_command_atom(conn);
   focus_next_command_atom = init_focus_next_command_atom(conn);
   focus_prev_command_atom = init_focus_prev_command_atom(conn);
+  maximize_command_atom = init_maximize_command_atom(conn);
+  snap_left_command_atom = init_snap_left_command_atom(conn);
+  snap_right_command_atom = init_snap_right_command_atom(conn);
+  maximize_command_atom = init_maximize_command_atom(conn);
+  fullscreen_command_atom = init_fullscreen_command_atom(conn);
 
   xcb_flush(conn);
 }

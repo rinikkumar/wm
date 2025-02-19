@@ -50,3 +50,27 @@ init_focus_prev_command_atom(xcb_connection_t* conn)
 {
   return init_atom(conn, WM_COMMAND_FOCUS_PREV);
 }
+
+xcb_atom_t
+init_snap_left_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_SNAP_LEFT);
+}
+
+xcb_atom_t
+init_snap_right_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_SNAP_RIGHT);
+}
+
+xcb_atom_t
+init_maximize_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_MAXIMIZE);
+}
+
+xcb_atom_t
+init_fullscreen_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_FULLSCREEN);
+}
