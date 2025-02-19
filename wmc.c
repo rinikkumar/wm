@@ -96,7 +96,7 @@ send_command(int argc, char* argv[])
   exit(1);
 }
 
-void
+static void
 setup(void)
 {
   conn = xcb_connect(NULL, NULL);

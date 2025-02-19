@@ -60,7 +60,7 @@ static struct Window* windows = NULL;
 static int window_count = 0;
 static struct Window* focused_window = NULL;
 
-struct Window*
+static struct Window*
 window_create(xcb_window_t id,
               xcb_window_t frame,
               xcb_window_t header,
@@ -83,7 +83,7 @@ window_create(xcb_window_t id,
   return win;
 }
 
-struct Window*
+static struct Window*
 window_find(xcb_window_t id)
 {
   for (int i = 0; i < window_count; i++) {
@@ -94,7 +94,7 @@ window_find(xcb_window_t id)
   return NULL;
 }
 
-void
+static void
 window_delete(xcb_window_t id)
 {
   for (int i = 0; i < window_count; i++) {
@@ -109,7 +109,7 @@ window_delete(xcb_window_t id)
   }
 }
 
-void
+static void
 save_window_state(struct Window* win)
 {
   if (win->state == STATE_NORMAL) {
@@ -120,7 +120,7 @@ save_window_state(struct Window* win)
   }
 }
 
-void
+static void
 restore_window_state(struct Window* win)
 {
   win->state = STATE_NORMAL;
@@ -130,7 +130,7 @@ restore_window_state(struct Window* win)
   win->height = win->saved.height;
 }
 
-void
+static void
 focus_window(struct Window* win)
 {
   if (win == focused_window)
@@ -165,7 +165,7 @@ focus_window(struct Window* win)
   xcb_flush(conn);
 }
 
-void
+static void
 resize_window(struct Window* win,
               int16_t x,
               int16_t y,
@@ -218,7 +218,7 @@ resize_window(struct Window* win,
   xcb_flush(conn);
 }
 
-void
+static void
 handle_kill_window()
 {
   if (focused_window) {
@@ -227,7 +227,7 @@ handle_kill_window()
   }
 }
 
-void
+static void
 handle_move_window(xcb_client_message_event_t* ev)
 {
   if (focused_window) {
@@ -246,7 +246,7 @@ handle_move_window(xcb_client_message_event_t* ev)
   }
 }
 
-void
+static void
 handle_resize_window(xcb_client_message_event_t* ev)
 {
   if (!focused_window)
@@ -263,7 +263,7 @@ handle_resize_window(xcb_client_message_event_t* ev)
                 true);
 }
 
-void
+static void
 focus_window_relative(int direction)
 {
   if (!window_count)
@@ -288,7 +288,7 @@ focus_window_relative(int direction)
   focus_window(&windows[new_index]);
 }
 
-void
+static void
 handle_toggle_snap_left(void)
 {
   if (!focused_window)
@@ -314,7 +314,7 @@ handle_toggle_snap_left(void)
   }
 }
 
-void
+static void
 handle_toggle_snap_right(void)
 {
   if (!focused_window)
@@ -340,7 +340,7 @@ handle_toggle_snap_right(void)
   }
 }
 
-void
+static void
 handle_toggle_maximize(void)
 {
   if (!focused_window)
@@ -366,7 +366,7 @@ handle_toggle_maximize(void)
   }
 }
 
-void
+static void
 handle_toggle_fullscreen(void)
 {
   if (!focused_window)
@@ -470,7 +470,7 @@ handle_map_request(xcb_map_request_event_t* ev)
   xcb_flush(conn);
 }
 
-void
+static void
 handle_configure_request(xcb_configure_request_event_t* ev)
 {
   debug("Handling configure request for window: %d", ev->window);
@@ -504,7 +504,7 @@ handle_configure_request(xcb_configure_request_event_t* ev)
   xcb_flush(conn);
 }
 
-void
+static void
 handle_create_notify(xcb_create_notify_event_t* ev)
 {
   debug("Window %d created at (%d, %d) with dimensions %dx%d",
@@ -515,7 +515,7 @@ handle_create_notify(xcb_create_notify_event_t* ev)
         ev->height);
 }
 
-void
+static void
 handle_destroy_notify(xcb_destroy_notify_event_t* ev)
 {
   debug("Window %d destroyed", ev->window);
@@ -536,7 +536,7 @@ handle_destroy_notify(xcb_destroy_notify_event_t* ev)
   }
 }
 
-void
+static void
 handle_button_press(xcb_button_press_event_t* ev)
 {
   struct Window* win = window_find(ev->event);
@@ -568,7 +568,7 @@ handle_button_press(xcb_button_press_event_t* ev)
   xcb_flush(conn);
 }
 
-void
+static void
 handle_button_release(xcb_button_release_event_t* ev)
 {
   (void)ev;
@@ -579,7 +579,7 @@ handle_button_release(xcb_button_release_event_t* ev)
   drag_state.window = NULL;
 }
 
-void
+static void
 handle_motion_notify(xcb_motion_notify_event_t* ev)
 {
   if (!drag_state.window)
@@ -601,7 +601,7 @@ handle_motion_notify(xcb_motion_notify_event_t* ev)
   xcb_flush(conn);
 }
 
-void
+static void
 handle_client_message(xcb_client_message_event_t* ev)
 {
   if (ev->type == kill_command_atom) {
@@ -627,7 +627,7 @@ handle_client_message(xcb_client_message_event_t* ev)
   }
 }
 
-void
+static void
 run(void)
 {
   xcb_generic_event_t* ev;
@@ -669,7 +669,7 @@ run(void)
   }
 }
 
-void
+static void
 setup(void)
 {
   conn = xcb_connect(NULL, NULL);
