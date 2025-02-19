@@ -12,6 +12,10 @@ static xcb_atom_t move_command_atom;
 static xcb_atom_t resize_command_atom;
 static xcb_atom_t focus_next_command_atom;
 static xcb_atom_t focus_prev_command_atom;
+static xcb_atom_t snap_left_command_atom;
+static xcb_atom_t snap_right_command_atom;
+static xcb_atom_t maximize_command_atom;
+static xcb_atom_t fullscreen_command_atom;
 
 struct Command
 {
@@ -26,6 +30,10 @@ static const struct Command commands[] = {
   { "resize-window", &resize_command_atom, 2 },
   { "focus-next", &focus_next_command_atom, 0 },
   { "focus-prev", &focus_prev_command_atom, 0 },
+  { "toggle-snap-left", &snap_left_command_atom, 0 },
+  { "toggle-snap-right", &snap_right_command_atom, 0 },
+  { "toggle-maximize", &maximize_command_atom, 0 },
+  { "toggle-fullscreen", &fullscreen_command_atom, 0 },
 };
 
 static void
@@ -104,6 +112,10 @@ setup(void)
   resize_command_atom = init_resize_command_atom(conn);
   focus_next_command_atom = init_focus_next_command_atom(conn);
   focus_prev_command_atom = init_focus_prev_command_atom(conn);
+  snap_left_command_atom = init_snap_left_command_atom(conn);
+  snap_right_command_atom = init_snap_right_command_atom(conn);
+  maximize_command_atom = init_maximize_command_atom(conn);
+  fullscreen_command_atom = init_fullscreen_command_atom(conn);
 
   xcb_flush(conn);
 }
