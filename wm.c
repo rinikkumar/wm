@@ -36,6 +36,13 @@ struct Window
   struct Window* next; // Next window in list
 };
 
+struct Workspace
+{
+  struct Window* windows;
+  int window_count;
+  struct Window* focused;
+};
+
 struct
 {
   struct Window* window; // Window being dragged (NULL if not dragging)
@@ -56,9 +63,10 @@ static xcb_atom_t snap_left_command_atom;
 static xcb_atom_t snap_right_command_atom;
 static xcb_atom_t maximize_command_atom;
 static xcb_atom_t fullscreen_command_atom;
-static struct Window* windows = NULL;
-static int window_count = 0;
-static struct Window* focused_window = NULL;
+static xcb_atom_t switch_workspace_command_atom;
+static xcb_atom_t send_to_workspace_command_atom;
+static struct Workspace workspaces[MAX_WORKSPACES] = { 0 };
+static int current_workspace = 0;
 
 static struct Window*
 window_create(xcb_window_t id,
@@ -69,8 +77,10 @@ window_create(xcb_window_t id,
               uint16_t width,
               uint16_t height)
 {
-  windows = realloc(windows, sizeof(struct Window) * (window_count + 1));
-  struct Window* win = &windows[window_count++];
+  struct Workspace* ws = &workspaces[current_workspace];
+  ws->windows =
+    realloc(ws->windows, sizeof(struct Window) * (ws->window_count + 1));
+  struct Window* win = &ws->windows[ws->window_count++];
 
   win->id = id;
   win->frame = frame;
@@ -79,6 +89,7 @@ window_create(xcb_window_t id,
   win->y = y;
   win->width = width;
   win->height = height;
+  win->state = STATE_NORMAL;
 
   return win;
 }
@@ -86,10 +97,11 @@ window_create(xcb_window_t id,
 static struct Window*
 window_find(xcb_window_t id)
 {
-  for (int i = 0; i < window_count; i++) {
-    if (windows[i].id == id || windows[i].frame == id ||
-        windows[i].header == id)
-      return &windows[i];
+  struct Workspace* ws = &workspaces[current_workspace];
+  for (int i = 0; i < ws->window_count; i++) {
+    if (ws->windows[i].id == id || ws->windows[i].frame == id ||
+        ws->windows[i].header == id)
+      return &ws->windows[i];
   }
   return NULL;
 }
@@ -97,13 +109,18 @@ window_find(xcb_window_t id)
 static void
 window_delete(xcb_window_t id)
 {
-  for (int i = 0; i < window_count; i++) {
-    if (windows[i].id == id) {
-      memmove(&windows[i],
-              &windows[i + 1],
-              sizeof(struct Window) * (window_count - i - 1));
-      window_count--;
-      windows = realloc(windows, sizeof(struct Window) * window_count);
+  struct Workspace* ws = &workspaces[current_workspace];
+  for (int i = 0; i < ws->window_count; i++) {
+    if (ws->windows[i].id == id) {
+      if (&ws->windows[i] == ws->focused) {
+        ws->focused = NULL;
+      }
+      memmove(&ws->windows[i],
+              &ws->windows[i + 1],
+              sizeof(struct Window) * (ws->window_count - i - 1));
+      ws->window_count--;
+      ws->windows =
+        realloc(ws->windows, sizeof(struct Window) * ws->window_count);
       return;
     }
   }
@@ -133,35 +150,36 @@ restore_window_state(struct Window* win)
 static void
 focus_window(struct Window* win)
 {
-  if (win == focused_window)
+  struct Workspace* ws = &workspaces[current_workspace];
+  if (win == ws->focused)
     return;
 
-  // Update header and border colors for focused/unfocused windows
-  for (int i = 0; i < window_count; i++) {
+  // Update colors for all windows in current workspace
+  for (int i = 0; i < ws->window_count; i++) {
     uint32_t header_color =
-      (win == &windows[i]) ? FOCUSED_HEADER_COLOR : UNFOCUSED_HEADER_COLOR;
+      (win == &ws->windows[i]) ? FOCUSED_HEADER_COLOR : UNFOCUSED_HEADER_COLOR;
     uint32_t border_color =
-      (win == &windows[i]) ? FOCUSED_BORDER_COLOR : UNFOCUSED_BORDER_COLOR;
+      (win == &ws->windows[i]) ? FOCUSED_BORDER_COLOR : UNFOCUSED_BORDER_COLOR;
 
     uint32_t values[] = { header_color };
     xcb_change_window_attributes(
-      conn, windows[i].header, XCB_CW_BACK_PIXEL, values);
+      conn, ws->windows[i].header, XCB_CW_BACK_PIXEL, values);
 
     values[0] = border_color;
     xcb_change_window_attributes(
-      conn, windows[i].frame, XCB_CW_BORDER_PIXEL, values);
+      conn, ws->windows[i].frame, XCB_CW_BORDER_PIXEL, values);
 
-    xcb_clear_area(conn, 0, windows[i].header, 0, 0, 0, 0);
+    xcb_clear_area(conn, 0, ws->windows[i].header, 0, 0, 0, 0);
   }
 
-  // Raise focused window to top
+  // Raise focused window
   if (win) {
-    uint32_t values_stack[] = { XCB_STACK_MODE_ABOVE };
+    uint32_t values[] = { XCB_STACK_MODE_ABOVE };
     xcb_configure_window(
-      conn, win->frame, XCB_CONFIG_WINDOW_STACK_MODE, values_stack);
+      conn, win->frame, XCB_CONFIG_WINDOW_STACK_MODE, values);
   }
 
-  focused_window = win;
+  ws->focused = win;
   xcb_flush(conn);
 }
 
@@ -219,8 +237,60 @@ resize_window(struct Window* win,
 }
 
 static void
+switch_to_workspace(int workspace)
+{
+  if (workspace < 0 || workspace >= MAX_WORKSPACES ||
+      workspace == current_workspace) {
+    return;
+  }
+
+  // Hide all windows in current workspace
+  for (int i = 0; i < workspaces[current_workspace].window_count; i++) {
+    xcb_unmap_window(conn, workspaces[current_workspace].windows[i].frame);
+  }
+
+  current_workspace = workspace;
+
+  // Show all windows in target workspace
+  for (int i = 0; i < workspaces[current_workspace].window_count; i++) {
+    xcb_map_window(conn, workspaces[current_workspace].windows[i].frame);
+  }
+
+  // Restore focused window
+  if (workspaces[current_workspace].focused) {
+    focus_window(workspaces[current_workspace].focused);
+  }
+
+  xcb_flush(conn);
+}
+
+static void
+send_window_to_workspace(struct Window* win, int workspace)
+{
+  if (!win || workspace < 0 || workspace >= MAX_WORKSPACES ||
+      workspace == current_workspace) {
+    return;
+  }
+
+  // Add window to target workspace
+  struct Workspace* target = &workspaces[workspace];
+  target->windows = realloc(target->windows,
+                            sizeof(struct Window) * (target->window_count + 1));
+  target->windows[target->window_count++] = *win;
+
+  // Hide window
+  xcb_unmap_window(conn, win->frame);
+
+  // Remove from current workspace
+  window_delete(win->id);
+
+  xcb_flush(conn);
+}
+
+static void
 handle_kill_window()
 {
+  struct Window* focused_window = workspaces[current_workspace].focused;
   if (focused_window) {
     xcb_kill_client(conn, focused_window->id);
     xcb_flush(conn);
@@ -230,6 +300,7 @@ handle_kill_window()
 static void
 handle_move_window(xcb_client_message_event_t* ev)
 {
+  struct Window* focused_window = workspaces[current_workspace].focused;
   if (focused_window) {
     int16_t dx = ev->data.data32[0];
     int16_t dy = ev->data.data32[1];
@@ -249,6 +320,7 @@ handle_move_window(xcb_client_message_event_t* ev)
 static void
 handle_resize_window(xcb_client_message_event_t* ev)
 {
+  struct Window* focused_window = workspaces[current_workspace].focused;
   if (!focused_window)
     return;
 
@@ -266,31 +338,33 @@ handle_resize_window(xcb_client_message_event_t* ev)
 static void
 focus_window_relative(int direction)
 {
-  if (!window_count)
+  struct Workspace* ws = &workspaces[current_workspace];
+  if (!ws->window_count)
     return;
 
-  if (!focused_window) {
-    focus_window(&windows[0]);
+  if (!ws->focused) {
+    focus_window(&ws->windows[0]);
     return;
   }
 
   // Find current window index
   int current = 0;
-  for (int i = 0; i < window_count; i++) {
-    if (&windows[i] == focused_window) {
+  for (int i = 0; i < ws->window_count; i++) {
+    if (&ws->windows[i] == ws->focused) {
       current = i;
       break;
     }
   }
 
   // Calculate new index with wrap-around
-  int new_index = (current + direction + window_count) % window_count;
-  focus_window(&windows[new_index]);
+  int new_index = (current + direction + ws->window_count) % ws->window_count;
+  focus_window(&ws->windows[new_index]);
 }
 
 static void
 handle_toggle_snap_left(void)
 {
+  struct Window* focused_window = workspaces[current_workspace].focused;
   if (!focused_window)
     return;
 
@@ -317,6 +391,7 @@ handle_toggle_snap_left(void)
 static void
 handle_toggle_snap_right(void)
 {
+  struct Window* focused_window = workspaces[current_workspace].focused;
   if (!focused_window)
     return;
 
@@ -343,6 +418,7 @@ handle_toggle_snap_right(void)
 static void
 handle_toggle_maximize(void)
 {
+  struct Window* focused_window = workspaces[current_workspace].focused;
   if (!focused_window)
     return;
 
@@ -369,6 +445,7 @@ handle_toggle_maximize(void)
 static void
 handle_toggle_fullscreen(void)
 {
+  struct Window* focused_window = workspaces[current_workspace].focused;
   if (!focused_window)
     return;
 
@@ -390,6 +467,23 @@ handle_toggle_fullscreen(void)
                   focused_window->height,
                   true);
   }
+}
+
+static void
+handle_switch_workspace(xcb_client_message_event_t* ev)
+{
+  int workspace = ev->data.data32[0];
+  switch_to_workspace(workspace);
+}
+
+static void
+handle_send_to_workspace(xcb_client_message_event_t* ev)
+{
+  if (!workspaces[current_workspace].focused)
+    return;
+
+  int workspace = ev->data.data32[0];
+  send_window_to_workspace(workspaces[current_workspace].focused, workspace);
 }
 
 void
@@ -526,10 +620,6 @@ handle_destroy_notify(xcb_destroy_notify_event_t* ev)
     xcb_destroy_window(conn, win->frame);
     xcb_destroy_window(conn, win->header);
 
-    if (win == focused_window) {
-      focused_window = NULL;
-    }
-
     window_delete(win->id);
 
     xcb_flush(conn);
@@ -601,7 +691,7 @@ handle_motion_notify(xcb_motion_notify_event_t* ev)
   xcb_flush(conn);
 }
 
-static void
+void
 handle_client_message(xcb_client_message_event_t* ev)
 {
   if (ev->type == kill_command_atom) {
@@ -622,6 +712,10 @@ handle_client_message(xcb_client_message_event_t* ev)
     handle_toggle_snap_left();
   } else if (ev->type == snap_right_command_atom) {
     handle_toggle_snap_right();
+  } else if (ev->type == switch_workspace_command_atom) {
+    handle_switch_workspace(ev);
+  } else if (ev->type == send_to_workspace_command_atom) {
+    handle_send_to_workspace(ev);
   } else {
     debug("Unhandled client message type: %d", ev->type);
   }
@@ -709,6 +803,8 @@ setup(void)
   snap_right_command_atom = init_snap_right_command_atom(conn);
   maximize_command_atom = init_maximize_command_atom(conn);
   fullscreen_command_atom = init_fullscreen_command_atom(conn);
+  switch_workspace_command_atom = init_switch_workspace_command_atom(conn);
+  send_to_workspace_command_atom = init_send_to_workspace_command_atom(conn);
 
   xcb_flush(conn);
 }

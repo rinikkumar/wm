@@ -13,6 +13,8 @@
 #define WM_COMMAND_SNAP_RIGHT "_WM_COMMAND_SNAP_RIGHT"
 #define WM_COMMAND_MAXIMIZE "_WM_COMMAND_MAXIMIZE"
 #define WM_COMMAND_FULLSCREEN "_WM_COMMAND_FULLSCREEN"
+#define WM_COMMAND_SWITCH_WORKSPACE "_WM_COMMAND_SWITCH_WORKSPACE"
+#define WM_COMMAND_SEND_TO_WORKSPACE "_WM_COMMAND_SEND_TO_WORKSPACE"
 
 // Initialize window manager command atoms
 xcb_atom_t
@@ -33,5 +35,9 @@ xcb_atom_t
 init_maximize_command_atom(xcb_connection_t* conn);
 xcb_atom_t
 init_fullscreen_command_atom(xcb_connection_t* conn);
+xcb_atom_t
+init_switch_workspace_command_atom(xcb_connection_t* conn);
+xcb_atom_t
+init_send_to_workspace_command_atom(xcb_connection_t* conn);
 
 #endif /* IPC_H */

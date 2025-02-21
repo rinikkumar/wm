@@ -11,4 +11,7 @@
 #define FOCUSED_BORDER_COLOR 0x0000FF   // Blue border
 #define FOCUSED_HEADER_COLOR 0x00FFFF   // Cyan header
 
+// Workspace
+#define MAX_WORKSPACES 10
+
 #endif /* CONFIG_H */
