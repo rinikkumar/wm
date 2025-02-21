@@ -86,3 +86,9 @@ init_send_to_workspace_command_atom(xcb_connection_t* conn)
 {
   return init_atom(conn, WM_COMMAND_SEND_TO_WORKSPACE);
 }
+
+xcb_atom_t
+init_quit_command_atom(xcb_connection_t* conn)
+{
+  return init_atom(conn, WM_COMMAND_QUIT);
+}

@@ -65,6 +65,7 @@ static xcb_atom_t maximize_command_atom;
 static xcb_atom_t fullscreen_command_atom;
 static xcb_atom_t switch_workspace_command_atom;
 static xcb_atom_t send_to_workspace_command_atom;
+static xcb_atom_t quit_command_atom;
 static struct Workspace workspaces[MAX_WORKSPACES] = { 0 };
 static int current_workspace = 0;
 
@@ -486,6 +487,13 @@ handle_send_to_workspace(xcb_client_message_event_t* ev)
   send_window_to_workspace(workspaces[current_workspace].focused, workspace);
 }
 
+static void
+handle_quit(void)
+{
+  xcb_disconnect(conn);
+  exit(0);
+}
+
 void
 handle_map_request(xcb_map_request_event_t* ev)
 {
@@ -694,7 +702,9 @@ handle_motion_notify(xcb_motion_notify_event_t* ev)
 void
 handle_client_message(xcb_client_message_event_t* ev)
 {
-  if (ev->type == kill_command_atom) {
+  if (ev->type == quit_command_atom) {
+    handle_quit();
+  } else if (ev->type == kill_command_atom) {
     handle_kill_window();
   } else if (ev->type == move_command_atom) {
     handle_move_window(ev);
@@ -805,6 +815,7 @@ setup(void)
   fullscreen_command_atom = init_fullscreen_command_atom(conn);
   switch_workspace_command_atom = init_switch_workspace_command_atom(conn);
   send_to_workspace_command_atom = init_send_to_workspace_command_atom(conn);
+  quit_command_atom = init_quit_command_atom(conn);
 
   xcb_flush(conn);
 }

@@ -18,6 +18,7 @@ static xcb_atom_t maximize_command_atom;
 static xcb_atom_t fullscreen_command_atom;
 static xcb_atom_t switch_workspace_command_atom;
 static xcb_atom_t send_to_workspace_command_atom;
+static xcb_atom_t quit_command_atom;
 
 struct Command
 {
@@ -38,6 +39,7 @@ static const struct Command commands[] = {
   { "toggle-fullscreen", &fullscreen_command_atom, 0 },
   { "switch-to-workspace", &switch_workspace_command_atom, 1 },
   { "send-to-workspace", &send_to_workspace_command_atom, 1 },
+  { "quit", &quit_command_atom, 0 },
 };
 
 static void
@@ -122,6 +124,7 @@ setup(void)
   fullscreen_command_atom = init_fullscreen_command_atom(conn);
   switch_workspace_command_atom = init_switch_workspace_command_atom(conn);
   send_to_workspace_command_atom = init_send_to_workspace_command_atom(conn);
+  quit_command_atom = init_quit_command_atom(conn);
 
   xcb_flush(conn);
 }
